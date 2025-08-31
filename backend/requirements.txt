@@ -1,0 +1,42 @@
+# FastAPI and server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+gunicorn==21.2.0
+
+# База данных
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Аутентификация и безопасность
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Валидация и конфигурация
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# HTTP клиенты для LLM API
+httpx==0.25.2
+aiohttp==3.9.1
+requests==2.31.0
+
+# Фоновые задачи
+apscheduler==3.10.4
+celery==5.3.4
+redis==5.0.1
+aioredis==2.0.1
+
+# Утилиты
+python-dotenv==1.0.0
+click==8.1.7
+typer==0.9.0
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+mypy==1.7.1
