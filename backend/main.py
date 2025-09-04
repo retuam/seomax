@@ -499,7 +499,8 @@ async def create_brand_project(
             brand_name=project_data.brand_name,
             brand_description=project_data.brand_description,
             keywords_count=project_data.keywords_count,
-            user_id=current_user.uuid
+            user_id=current_user.uuid,
+            word_group_id=project_data.word_group_id  # Привязка к группе слов
         )
         db.add(brand_project)
         await db.flush()

@@ -129,6 +129,7 @@ class BrandProjectCreate(BaseModel):
     brand_description: str
     keywords_count: int = 50
     competitors: List[str] = []
+    word_group_id: Optional[uuid.UUID] = None  # Привязка к группе слов
 
 class BrandProjectUpdate(BaseModel):
     name: Optional[str] = None
