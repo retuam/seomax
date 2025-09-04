@@ -412,18 +412,64 @@ async def get_group_analytics(
         
         logger.info(f"Найдено слов в группе: {len(words_list)}")
         
-        # Формируем аналитику по каждому слову
+        # Формируем аналитику по каждому слову с использованием только последнего среза
         words_analytics = []
         for word in words_list:
-            # Получаем SERP для каждого слова
-            serp_results = await db.execute(select(WordSerp).where(WordSerp.word_id == word.uuid))
-            serp_list = list(serp_results.scalars().all())
+            # Получаем ТОЛЬКО последний SERP для каждого слова
+            latest_serp = await db.scalar(
+                select(WordSerp)
+                .where(WordSerp.word_id == word.uuid)
+                .order_by(WordSerp.create_time.desc())
+                .limit(1)
+            )
             
-            # Получаем компании
-            companies_list = []
-            for serp in serp_list:
-                companies_result = await db.execute(select(Company).where(Company.serp_id == serp.uuid))
-                companies_list.extend(companies_result.scalars().all())
+            # Получаем предыдущий SERP для сравнения
+            previous_serp = await db.scalar(
+                select(WordSerp)
+                .where(WordSerp.word_id == word.uuid)
+                .order_by(WordSerp.create_time.desc())
+                .offset(1)
+                .limit(1)
+            )
+            
+            # Данные последнего среза
+            latest_companies_count = 0
+            latest_brand_mentions = 0
+            latest_competitor_mentions = 0
+            last_analysis_date = None
+            
+            if latest_serp:
+                # Компании из последнего среза
+                latest_companies_result = await db.execute(
+                    select(Company).where(Company.serp_id == latest_serp.uuid)
+                )
+                latest_companies_count = len(list(latest_companies_result.scalars().all()))
+                
+                # Brand mentions из последнего среза
+                from models import BrandMention
+                latest_brand_result = await db.execute(
+                    select(BrandMention).where(BrandMention.serp_id == latest_serp.uuid)
+                )
+                brand_mentions_list = list(latest_brand_result.scalars().all())
+                latest_brand_mentions = sum(1 for bm in brand_mentions_list if bm.brand_mentioned == 1)
+                latest_competitor_mentions = sum(1 for bm in brand_mentions_list if bm.competitor_mentioned == 1)
+                last_analysis_date = latest_serp.create_time
+            
+            # Данные предыдущего среза для сравнения
+            previous_companies_count = 0
+            previous_brand_mentions = 0
+            
+            if previous_serp:
+                previous_companies_result = await db.execute(
+                    select(Company).where(Company.serp_id == previous_serp.uuid)
+                )
+                previous_companies_count = len(list(previous_companies_result.scalars().all()))
+                
+                previous_brand_result = await db.execute(
+                    select(BrandMention).where(BrandMention.serp_id == previous_serp.uuid)
+                )
+                previous_brand_list = list(previous_brand_result.scalars().all())
+                previous_brand_mentions = sum(1 for bm in previous_brand_list if bm.brand_mentioned == 1)
             
             words_analytics.append({
                 "word": {
@@ -432,8 +478,14 @@ async def get_group_analytics(
                     "status": word.status,
                     "create_time": word.create_time.isoformat() if word.create_time else None
                 },
-                "serp_count": len(serp_list),
-                "companies_count": len(companies_list)
+                "latest_companies_count": latest_companies_count,
+                "latest_brand_mentions": latest_brand_mentions,
+                "latest_competitor_mentions": latest_competitor_mentions,
+                "previous_companies_count": previous_companies_count,
+                "previous_brand_mentions": previous_brand_mentions,
+                "companies_change": latest_companies_count - previous_companies_count,
+                "brand_mentions_change": latest_brand_mentions - previous_brand_mentions,
+                "last_analysis_date": last_analysis_date.isoformat() if last_analysis_date else None
             })
         
         return {
