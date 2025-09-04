@@ -82,8 +82,8 @@ app.add_middleware(
 # CORS настройки для фронтенда
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],  # Разрешить все домены
+    allow_credentials=False,  # Отключить credentials для безопасности при allow_origins=["*"]
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"]

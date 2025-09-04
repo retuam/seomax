@@ -14,8 +14,9 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 
 # Валидация и конфигурация
-pydantic==2.5.3
+pydantic[email]==2.5.3
 pydantic-settings==2.1.0
+email-validator==2.1.0
 
 # HTTP клиенты для LLM API
 httpx==0.25.2
@@ -32,6 +33,11 @@ aioredis==2.0.1
 python-dotenv==1.0.0
 click==8.1.7
 typer==0.9.0
+loguru==0.7.2
+certifi==2023.11.17
+
+# SSL и криптография
+cryptography==41.0.8
 
 # Development
 pytest==7.4.3
