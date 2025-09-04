@@ -21,11 +21,31 @@ class LLMWorker:
             "gemini": llm_service.get_serp_from_gemini
         }
     
+    def extract_companies_simple(self, serp_content: str) -> list:
+        """Простое извлечение компаний из SERP контента"""
+        import re
+        companies = []
+        
+        # Ищем строки, которые могут быть названиями компаний
+        lines = serp_content.split('\n')
+        for line in lines:
+            # Ищем строки с точками (списки результатов)
+            if re.match(r'^\d+\.', line.strip()):
+                # Извлекаем название после номера
+                match = re.search(r'^\d+\.\s*([^-]+)', line.strip())
+                if match:
+                    company_name = match.group(1).strip()
+                    if len(company_name) > 2 and len(company_name) < 100:
+                        companies.append(company_name)
+        
+        return companies[:10]  # Максимум 10 компаний
+    
     async def process_word_with_llm(self, word: Word, llm: LLM, db: AsyncSession) -> bool:
         """Обработка одного слова с одним LLM провайдером"""
         try:
             # Проверяем, был ли уже запрос за последние 2 недели
-            two_weeks_ago = datetime.utcnow() - timedelta(days=14)
+            from datetime import timezone
+            two_weeks_ago = datetime.now(timezone.utc) - timedelta(days=14)
             
             existing_serp = await db.scalar(
                 select(WordSerp).where(
@@ -46,21 +66,24 @@ class LLMWorker:
                 return False
             
             logger.info(f"Получаем SERP для '{word.name}' от {llm.name}")
-            serp_content = await llm_function(word.name)
+            
+            # Создаем новую async сессию для LLM вызова
+            async with get_async_session() as llm_db:
+                serp_content = await llm_function(word.name)
             
             # Сохраняем результат SERP
             word_serp = WordSerp(
                 content=serp_content,
                 llm_id=llm.uuid,
                 word_id=word.uuid,
-                create_time=datetime.utcnow()
+                create_time=datetime.now(timezone.utc)
             )
             
             db.add(word_serp)
             await db.flush()  # Получаем ID для связи с компаниями
             
-            # Извлекаем компании из SERP
-            companies = await llm_service.extract_companies_from_serp_simple(serp_content)
+            # Извлекаем компании из SERP (упрощенная версия без LLM)
+            companies = self.extract_companies_simple(serp_content)
             
             # Сохраняем компании
             for company_name in companies:
@@ -103,8 +126,8 @@ class LLMWorker:
             )
             competitor_names = [comp.name for comp in competitors.scalars().all()]
             
-            # Анализируем упоминания через LLM
-            analysis_result = await llm_service.analyze_brand_mentions(
+            # Упрощенный анализ упоминаний без LLM
+            analysis_result = self.analyze_brand_mentions_simple(
                 serp.content,
                 brand_project.brand_name,
                 competitor_names
@@ -132,6 +155,48 @@ class LLMWorker:
             await db.rollback()
             logger.error(f"Ошибка анализа упоминаний для SERP {serp.uuid}: {e}")
             return False
+    
+    def analyze_brand_mentions_simple(self, serp_content: str, brand_name: str, competitor_names: list) -> dict:
+        """Простой анализ упоминаний брендов без LLM"""
+        content_lower = serp_content.lower()
+        brand_lower = brand_name.lower()
+        
+        # Проверяем упоминание бренда
+        brand_mentioned = brand_lower in content_lower
+        brand_position = None
+        if brand_mentioned:
+            # Ищем позицию в списке результатов
+            lines = serp_content.split('\n')
+            for i, line in enumerate(lines, 1):
+                if brand_lower in line.lower():
+                    brand_position = i
+                    break
+        
+        # Проверяем упоминания конкурентов
+        competitor_mentioned = False
+        mentioned_competitor = None
+        competitor_position = None
+        
+        for competitor in competitor_names:
+            if competitor.lower() in content_lower:
+                competitor_mentioned = True
+                mentioned_competitor = competitor
+                # Ищем позицию конкурента
+                lines = serp_content.split('\n')
+                for i, line in enumerate(lines, 1):
+                    if competitor.lower() in line.lower():
+                        competitor_position = i
+                        break
+                break
+        
+        return {
+            "brand_mentioned": brand_mentioned,
+            "competitor_mentioned": competitor_mentioned,
+            "mentioned_competitor": mentioned_competitor,
+            "brand_position": brand_position,
+            "competitor_position": competitor_position,
+            "confidence": 90
+        }
 
     async def run_worker_cycle(self):
         """Основной цикл воркера"""
