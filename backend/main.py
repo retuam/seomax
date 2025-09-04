@@ -396,7 +396,7 @@ async def start_analytics(
     """Запуск общей аналитики"""
     try:
         # Запускаем воркер для обновления SERP данных
-        await llm_worker()
+        await llm_worker.run_worker_cycle()
         return {"message": "Аналитика запущена", "status": "started"}
     except Exception as e:
         logger.error(f"Ошибка запуска аналитики: {e}")
@@ -410,7 +410,7 @@ async def start_group_analytics(
     """Запуск аналитики для всех групп"""
     try:
         # Запускаем воркер для обновления SERP данных
-        await llm_worker()
+        await llm_worker.run_worker_cycle()
         return {"message": "Аналитика групп запущена", "status": "started"}
     except Exception as e:
         logger.error(f"Ошибка запуска аналитики групп: {e}")
@@ -430,7 +430,7 @@ async def start_group_analytics_by_id(
             raise HTTPException(status_code=404, detail="Группа не найдена")
         
         # Запускаем воркер для обновления SERP данных
-        await llm_worker()
+        await llm_worker.run_worker_cycle()
         return {"message": f"Аналитика для группы {group.name} запущена", "status": "started"}
     except HTTPException:
         raise
