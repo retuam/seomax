@@ -136,6 +136,7 @@ class BrandProjectUpdate(BaseModel):
     brand_name: Optional[str] = None
     brand_description: Optional[str] = None
     keywords_count: Optional[int] = None
+    word_group_id: Optional[uuid.UUID] = None
 
 class BrandProjectResponse(BaseModel):
     uuid: uuid.UUID

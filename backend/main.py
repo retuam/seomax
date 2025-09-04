@@ -584,6 +584,9 @@ async def update_brand_project(
     current_user: User = Depends(get_current_user)
 ):
     try:
+        # Логирование для отладки
+        logger.info(f"Обновление brand проекта {project_id} с word_group_id: {project_data.word_group_id}")
+        
         # 1. Найти проект
         project_result = await db.execute(
             select(BrandProject).where(
@@ -596,6 +599,19 @@ async def update_brand_project(
         if not brand_project:
             raise HTTPException(status_code=404, detail="Brand project not found")
         
+        logger.info(f"Текущий word_group_id проекта: {brand_project.word_group_id}")
+        
+        # Проверяем существование группы слов, если указана
+        if project_data.word_group_id:
+            group_result = await db.execute(
+                select(WordGroup).where(WordGroup.uuid == project_data.word_group_id)
+            )
+            word_group = group_result.scalar_one_or_none()
+            if not word_group:
+                logger.warning(f"Группа слов с ID {project_data.word_group_id} не найдена")
+                raise HTTPException(status_code=400, detail="Word group not found")
+            logger.info(f"Найдена группа слов для обновления: {word_group.name}")
+        
         # 2. Обновить поля
         if project_data.name is not None:
             brand_project.name = project_data.name
@@ -605,9 +621,14 @@ async def update_brand_project(
             brand_project.brand_description = project_data.brand_description
         if project_data.keywords_count is not None:
             brand_project.keywords_count = project_data.keywords_count
+        if project_data.word_group_id is not None:
+            brand_project.word_group_id = project_data.word_group_id
             
         await db.commit()
         await db.refresh(brand_project)
+        
+        # Логирование после обновления
+        logger.info(f"Brand проект обновлен, новый word_group_id: {brand_project.word_group_id}")
         
         # 3. Загрузить конкурентов
         competitors_result = await db.execute(
@@ -635,6 +656,9 @@ async def update_brand_project(
                 for c in competitors_db
             ]
         }
+        
+        # Логирование ответа для PUT
+        logger.info(f"Отправляем ответ PUT с word_group_id: {response['word_group_id']}")
         
         return BrandProjectResponse.model_validate(response)
         
