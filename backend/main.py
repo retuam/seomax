@@ -556,6 +556,78 @@ async def create_brand_project(
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
+@app.put("/api/brand-projects/{project_id}", response_model=BrandProjectResponse)
+async def update_brand_project(
+    project_id: uuid.UUID,
+    project_data: BrandProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        # 1. Найти проект
+        project_result = await db.execute(
+            select(BrandProject).where(
+                BrandProject.uuid == project_id,
+                BrandProject.user_id == current_user.uuid
+            )
+        )
+        brand_project = project_result.scalar_one_or_none()
+        
+        if not brand_project:
+            raise HTTPException(status_code=404, detail="Brand project not found")
+        
+        # 2. Обновить поля
+        if project_data.name is not None:
+            brand_project.name = project_data.name
+        if project_data.brand_name is not None:
+            brand_project.brand_name = project_data.brand_name
+        if project_data.brand_description is not None:
+            brand_project.brand_description = project_data.brand_description
+        if project_data.keywords_count is not None:
+            brand_project.keywords_count = project_data.keywords_count
+            
+        await db.commit()
+        await db.refresh(brand_project)
+        
+        # 3. Загрузить конкурентов
+        competitors_result = await db.execute(
+            select(Competitor).where(Competitor.project_id == brand_project.uuid)
+        )
+        competitors_db = competitors_result.scalars().all()
+        
+        # 4. Формировать ответ
+        response = {
+            "uuid": brand_project.uuid,
+            "name": brand_project.name,
+            "brand_name": brand_project.brand_name,
+            "brand_description": brand_project.brand_description,
+            "keywords_count": brand_project.keywords_count,
+            "user_id": brand_project.user_id,
+            "word_group_id": brand_project.word_group_id,
+            "create_time": brand_project.create_time,
+            "status": brand_project.status,
+            "competitors": [
+                {
+                    "uuid": c.uuid,
+                    "name": c.name,
+                    "create_time": c.create_time
+                }
+                for c in competitors_db
+            ]
+        }
+        
+        return BrandProjectResponse.model_validate(response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Ошибка обновления brand проекта: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
 @app.get("/api/brand-projects", response_model=List[BrandProjectResponse])
 async def get_brand_projects(
     db: AsyncSession = Depends(get_db),
