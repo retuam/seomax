@@ -515,6 +515,108 @@ async def run_worker_cycle(
     asyncio.create_task(llm_worker.run_worker_cycle())
     return {"message": "Цикл обновления SERP данных запущен в фоне"}
 
+@app.post("/api/analytics/group/{group_id}/start")
+async def start_group_analysis(
+    group_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Принудительный запуск анализа для конкретной группы слов"""
+    try:
+        logger.info(f"Запуск принудительного анализа для группы: {group_id}")
+        
+        # Проверяем что группа существует
+        group = await db.scalar(select(WordGroup).where(WordGroup.uuid == group_id))
+        if not group:
+            return {"error": "Группа не найдена"}
+        
+        # Получаем слова в группе
+        words_result = await db.execute(select(Word).where(Word.group_id == group_id))
+        words_list = list(words_result.scalars().all())
+        
+        if not words_list:
+            return {"error": "В группе нет слов для анализа"}
+        
+        # Получаем активные LLM провайдеры
+        llms_result = await db.execute(select(LLM).where(LLM.is_active == 1))
+        llms_list = list(llms_result.scalars().all())
+        
+        if not llms_list:
+            return {"error": "Нет активных LLM провайдеров"}
+        
+        # Запускаем анализ для каждого слова с каждым LLM
+        from llm_worker_sync import sync_llm_worker
+        import asyncio
+        
+        async def run_group_analysis():
+            """Асинхронная функция для запуска анализа группы"""
+            processed_count = 0
+            
+            # Используем синхронный воркер в отдельном потоке
+            import threading
+            
+            def sync_analysis():
+                nonlocal processed_count
+                with sync_llm_worker.SessionLocal() as db_session:
+                    for word in words_list:
+                        for llm in llms_list:
+                            # Принудительно обновляем - удаляем проверку на 2 недели
+                            logger.info(f"Принудительный анализ для '{word.name}' с {llm.name}")
+                            
+                            # Получаем SERP данные
+                            if llm.name.lower() == "openai" and hasattr(sync_llm_worker, 'get_serp_from_openai_sync'):
+                                serp_content = sync_llm_worker.get_serp_from_openai_sync(word.name)
+                            else:
+                                serp_content = sync_llm_worker.get_mock_serp(word.name, llm.name)
+                            
+                            # Сохраняем новый SERP
+                            from datetime import datetime, timezone
+                            word_serp = WordSerp(
+                                content=serp_content,
+                                llm_id=llm.uuid,
+                                word_id=word.uuid,
+                                create_time=datetime.now(timezone.utc)
+                            )
+                            
+                            db_session.add(word_serp)
+                            db_session.flush()
+                            
+                            # Извлекаем компании
+                            companies = sync_llm_worker.extract_companies_simple(serp_content)
+                            for company_name in companies:
+                                company = Company(
+                                    name=company_name,
+                                    serp_id=word_serp.uuid
+                                )
+                                db_session.add(company)
+                            
+                            db_session.commit()
+                            processed_count += 1
+                            
+                            logger.info(f"Создан новый SERP для '{word.name}' с {llm.name}, извлечено {len(companies)} компаний")
+            
+            # Запускаем в отдельном потоке
+            thread = threading.Thread(target=sync_analysis)
+            thread.start()
+            thread.join()
+            
+            logger.info(f"✅ Принудительный анализ завершен. Обработано {processed_count} комбинаций")
+        
+        # Запускаем анализ асинхронно
+        asyncio.create_task(run_group_analysis())
+        
+        return {
+            "message": f"Принудительный анализ запущен для группы '{group.name}'",
+            "group_id": str(group_id),
+            "words_count": len(words_list),
+            "llm_count": len(llms_list),
+            "total_combinations": len(words_list) * len(llms_list)
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка запуска принудительного анализа: {e}")
+        return {"error": f"Ошибка запуска анализа: {str(e)}"}
+
 # === СТАТИСТИКА ===
 
 @app.get("/api/stats")
