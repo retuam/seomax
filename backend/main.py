@@ -493,6 +493,9 @@ async def create_brand_project(
     current_user: User = Depends(get_current_user)
 ):
     try:
+        # Логирование для отладки
+        logger.info(f"Создание brand проекта с word_group_id: {project_data.word_group_id}")
+        
         # 1. Создаём проект
         brand_project = BrandProject(
             name=project_data.name,
@@ -504,6 +507,9 @@ async def create_brand_project(
         )
         db.add(brand_project)
         await db.flush()
+        
+        # Логирование после создания
+        logger.info(f"Brand проект создан с UUID: {brand_project.uuid}, word_group_id: {brand_project.word_group_id}")
 
         # 2. Создаём конкурентов (если переданы)
         competitors = []
