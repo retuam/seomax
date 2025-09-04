@@ -388,6 +388,56 @@ async def get_word_analytics(
         traceback.print_exc()
         return {"error": f"Ошибка: {str(e)}"}
 
+@app.post("/api/analytics/start")
+async def start_analytics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Запуск общей аналитики"""
+    try:
+        # Запускаем воркер для обновления SERP данных
+        await llm_worker()
+        return {"message": "Аналитика запущена", "status": "started"}
+    except Exception as e:
+        logger.error(f"Ошибка запуска аналитики: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка запуска аналитики")
+
+@app.post("/api/analytics/group/start")
+async def start_group_analytics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Запуск аналитики для всех групп"""
+    try:
+        # Запускаем воркер для обновления SERP данных
+        await llm_worker()
+        return {"message": "Аналитика групп запущена", "status": "started"}
+    except Exception as e:
+        logger.error(f"Ошибка запуска аналитики групп: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка запуска аналитики групп")
+
+@app.post("/api/analytics/group/{group_id}/start")
+async def start_group_analytics_by_id(
+    group_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Запуск аналитики для конкретной группы"""
+    try:
+        # Проверяем существование группы
+        group = await db.scalar(select(WordGroup).where(WordGroup.uuid == group_id))
+        if not group:
+            raise HTTPException(status_code=404, detail="Группа не найдена")
+        
+        # Запускаем воркер для обновления SERP данных
+        await llm_worker()
+        return {"message": f"Аналитика для группы {group.name} запущена", "status": "started"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка запуска аналитики для группы {group_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка запуска аналитики для группы")
+
 @app.get("/api/analytics/group/{group_id}")
 async def get_group_analytics(
     group_id: uuid.UUID,
