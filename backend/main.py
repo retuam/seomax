@@ -496,6 +496,17 @@ async def create_brand_project(
         # Логирование для отладки
         logger.info(f"Создание brand проекта с word_group_id: {project_data.word_group_id}")
         
+        # Проверяем существование группы слов, если указана
+        if project_data.word_group_id:
+            group_result = await db.execute(
+                select(WordGroup).where(WordGroup.uuid == project_data.word_group_id)
+            )
+            word_group = group_result.scalar_one_or_none()
+            if not word_group:
+                logger.warning(f"Группа слов с ID {project_data.word_group_id} не найдена")
+                raise HTTPException(status_code=400, detail="Word group not found")
+            logger.info(f"Найдена группа слов: {word_group.name}")
+        
         # 1. Создаём проект
         brand_project = BrandProject(
             name=project_data.name,
@@ -550,6 +561,9 @@ async def create_brand_project(
                 for c in competitors_db
             ]
         }
+
+        # Логирование ответа
+        logger.info(f"Отправляем ответ с word_group_id: {response['word_group_id']}")
 
         # 5. Возвращаем через модель Pydantic v2 (если не совпадёт — лови ошибку в логе!)
         return BrandProjectResponse.model_validate(response)
