@@ -30,7 +30,7 @@ if settings.database_url.startswith("sqlite"):
     # Настройки для SQLite
     engine = create_async_engine(
         settings.database_url,
-        echo=settings.debug,
+        echo=False,  # Отключаем логи SQL запросов
         connect_args={"check_same_thread": False}
     )
 else:
@@ -39,7 +39,7 @@ else:
     engine = create_async_engine(
         settings.database_url,
         poolclass=NullPool,
-        echo=settings.debug,
+        echo=False,  # Отключаем логи SQL запросов
         connect_args={
             # SSL context is mandatory for Supabase Pooler
             "ssl": ssl_ctx,

@@ -12,6 +12,12 @@ def setup_logging():
     # Удаляем стандартный обработчик
     logger.remove()
     
+    # Отключаем логи SQLAlchemy
+    import logging
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+    
     # Формат логов
     log_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
@@ -27,7 +33,8 @@ def setup_logging():
         level=settings.log_level,
         colorize=True,
         backtrace=True,
-        diagnose=True
+        diagnose=True,
+        filter=lambda record: not record["name"].startswith("sqlalchemy")
     )
     
     # Файловый вывод
@@ -43,7 +50,8 @@ def setup_logging():
         compression="zip",  # Сжимать старые логи
         backtrace=True,
         diagnose=True,
-        enqueue=True  # Асинхронная запись
+        enqueue=True,  # Асинхронная запись
+        filter=lambda record: not record["name"].startswith("sqlalchemy")
     )
     
     # Отдельный файл для ошибок
