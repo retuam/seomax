@@ -72,7 +72,7 @@ async def get_anthropic_response_direct(word: str) -> str:
     """Direct Anthropic response retrieval for brand analysis"""
     try:
         headers = {
-            "Authorization": f"Bearer {settings.anthropic_api_key}",
+            "x-api-key": settings.anthropic_api_key,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01"
         }
@@ -425,27 +425,46 @@ async def analyze_brand_mentions_for_word_direct(word, word_serp, llm_response, 
         )
         
         for brand_project in brand_projects.scalars().all():
+            logger.info(f"🔍 Analyzing brand project: {brand_project.name} (brand: {brand_project.brand_name})")
+            
             # Get competitors for this project
             competitors = await db.execute(
                 select(Competitor).where(Competitor.project_id == brand_project.uuid)
             )
+            competitors_list = list(competitors.scalars().all())
+            logger.info(f"📋 Found {len(competitors_list)} competitors: {[c.name for c in competitors_list]}")
             
             # Check brand and competitor mentions
             brand_mentioned = brand_project.brand_name.lower() in llm_response.lower()
+            logger.info(f"🏷️ Brand '{brand_project.brand_name}' mentioned: {brand_mentioned}")
             
-            for competitor in competitors.scalars().all():
+            # Always create a record for the brand project, even if no competitors
+            if not competitors_list:
+                logger.info("⚠️ No competitors found, creating brand-only mention record")
+                brand_mention = BrandMention(
+                    project_id=brand_project.uuid,
+                    serp_id=word_serp.uuid,
+                    brand_mentioned=1 if brand_mentioned else 0,
+                    mentioned_competitor=None,
+                    competitor_mentioned=0
+                )
+                db.add(brand_mention)
+                logger.info(f"✅ Created brand mention record: brand={brand_mentioned}")
+            
+            for competitor in competitors_list:
                 competitor_mentioned = competitor.name.lower() in llm_response.lower()
+                logger.info(f"🏢 Competitor '{competitor.name}' mentioned: {competitor_mentioned}")
                 
-                if brand_mentioned or competitor_mentioned:
-                    # Create mention record
-                    brand_mention = BrandMention(
-                        project_id=brand_project.uuid,
-                        serp_id=word_serp.uuid,
-                        brand_mentioned=1 if brand_mentioned else 0,
-                        mentioned_competitor=competitor.name if competitor_mentioned else None,
-                        competitor_mentioned=1 if competitor_mentioned else 0
-                    )
-                    db.add(brand_mention)
+                # Create mention record for each competitor (whether mentioned or not)
+                brand_mention = BrandMention(
+                    project_id=brand_project.uuid,
+                    serp_id=word_serp.uuid,
+                    brand_mentioned=1 if brand_mentioned else 0,
+                    mentioned_competitor=competitor.name,
+                    competitor_mentioned=1 if competitor_mentioned else 0
+                )
+                db.add(brand_mention)
+                logger.info(f"✅ Created mention record: brand={brand_mentioned}, competitor={competitor.name}, mentioned={competitor_mentioned}")
                     
     except Exception as e:
         logger.error(f"Error analyzing brand mentions: {e}")

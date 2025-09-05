@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API ключ")
     anthropic_api_url: str = Field(default="https://api.anthropic.com/v1/messages", description="Anthropic API URL")
-    anthropic_model: str = Field(default="claude-3-sonnet-20240229", description="Модель Anthropic")
+    anthropic_model: str = Field(default="claude-3-5-sonnet-20241022", description="Модель Anthropic")
     
     # Grok
     grok_api_key: Optional[str] = Field(default=None, description="Grok API ключ")
