@@ -35,6 +35,8 @@ class WordGroupUpdate(BaseModel):
 class WordGroupResponse(BaseModel):
     uuid: uuid.UUID
     name: str
+    user_id: uuid.UUID
+    create_time: datetime
     
     class Config:
         from_attributes = True
@@ -137,6 +139,7 @@ class BrandProjectUpdate(BaseModel):
     brand_description: Optional[str] = None
     keywords_count: Optional[int] = None
     word_group_id: Optional[uuid.UUID] = None
+    competitors: Optional[List[str]] = None
 
 class BrandProjectResponse(BaseModel):
     uuid: uuid.UUID
