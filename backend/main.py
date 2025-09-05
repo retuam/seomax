@@ -656,21 +656,116 @@ async def start_group_analytics_by_id(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Start analytics for specific group"""
+    """Start brand analysis for specific word group"""
     try:
         # Check group existence
         group = await db.scalar(select(WordGroup).where(WordGroup.uuid == group_id))
         if not group:
             raise HTTPException(status_code=404, detail="Group not found")
         
-        # Direct SERP data update without worker
+        # Check if there are brand projects for this group
+        brand_projects = await db.execute(
+            select(BrandProject).where(BrandProject.word_group_id == group_id)
+        )
+        brand_projects_list = list(brand_projects.scalars().all())
+        
+        if not brand_projects_list:
+            logger.warning(f"No brand projects found for group {group_id}")
+            return {
+                "message": f"No brand projects found for group {group.name}",
+                "status": "no_projects",
+                "group_name": group.name
+            }
+        
+        logger.info(f"Starting brand analysis for group {group.name} with {len(brand_projects_list)} brand projects")
+        
+        # Run SERP data update and brand analysis
         await update_serp_data_direct(db, group_id=group_id)
-        return {"message": f"Analytics for group {group.name} started", "status": "started"}
+        
+        # Get analysis results including company extraction
+        total_mentions = 0
+        brand_mentions = 0
+        competitor_mentions = 0
+        extracted_companies = set()
+        tracked_brands = []
+        tracked_competitors = []
+        
+        for project in brand_projects_list:
+            # Get brand mentions for this project
+            mentions_result = await db.execute(
+                select(BrandMention).where(BrandMention.brand_project_id == project.uuid)
+            )
+            mentions = list(mentions_result.scalars().all())
+            
+            total_mentions += len(mentions)
+            brand_mentions += sum(1 for m in mentions if m.brand_mentioned)
+            competitor_mentions += sum(1 for m in mentions if m.competitor_mentioned)
+            
+            # Track brands and competitors for this project
+            tracked_brands.append({
+                "brand_name": project.brand_name,
+                "mentions": sum(1 for m in mentions if m.brand_mentioned),
+                "project_name": project.name
+            })
+            
+            # Get competitors for this project
+            competitors_result = await db.execute(
+                select(Competitor).where(Competitor.project_id == project.uuid)
+            )
+            competitors = list(competitors_result.scalars().all())
+            
+            for competitor in competitors:
+                competitor_mention_count = sum(1 for m in mentions if m.competitor_mentioned and m.competitor_name == competitor.name)
+                if competitor_mention_count > 0:
+                    tracked_competitors.append({
+                        "competitor_name": competitor.name,
+                        "mentions": competitor_mention_count,
+                        "project_name": project.name
+                    })
+        
+        # Get all companies extracted from LLM responses for this group
+        words_in_group = await db.execute(
+            select(Word).where(Word.group_id == group_id, Word.status == 1)
+        )
+        words_list = list(words_in_group.scalars().all())
+        
+        for word in words_list:
+            # Get SERP results for this word
+            serp_results = await db.execute(
+                select(WordSerp).where(WordSerp.word_id == word.uuid)
+            )
+            serp_list = list(serp_results.scalars().all())
+            
+            # Get companies extracted from these SERP results
+            for serp in serp_list:
+                companies_result = await db.execute(
+                    select(Company).where(Company.serp_id == serp.uuid)
+                )
+                companies = list(companies_result.scalars().all())
+                for company in companies:
+                    extracted_companies.add(company.name)
+        
+        return {
+            "message": f"Brand analysis for group {group.name} completed",
+            "status": "completed",
+            "group_name": group.name,
+            "brand_projects_count": len(brand_projects_list),
+            "analysis_results": {
+                "total_mentions": total_mentions,
+                "brand_mentions": brand_mentions,
+                "competitor_mentions": competitor_mentions,
+                "brand_visibility_percentage": (brand_mentions / total_mentions * 100) if total_mentions > 0 else 0,
+                "extracted_companies_count": len(extracted_companies),
+                "extracted_companies": sorted(list(extracted_companies)),
+                "tracked_brands": tracked_brands,
+                "tracked_competitors": tracked_competitors
+            }
+        }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error starting analytics for group {group_id}: {e}")
-        raise HTTPException(status_code=500, detail="Error starting group analytics")
+        logger.error(f"Error starting brand analysis for group {group_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error starting brand analysis")
 
 @app.get("/api/analytics/group/{group_id}")
 async def get_group_analytics(
