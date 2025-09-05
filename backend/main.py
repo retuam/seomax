@@ -136,13 +136,15 @@ async def update_serp_data_direct(db: AsyncSession, group_id: Optional[uuid.UUID
                     # Check if data needs updating
                     from datetime import timezone
                     two_weeks_ago = datetime.now(timezone.utc) - timedelta(days=14)
+                    # Remove timezone for PostgreSQL comparison
+                    two_weeks_ago_naive = two_weeks_ago.replace(tzinfo=None)
                     
                     existing_serp = await db.scalar(
                         select(WordSerp).where(
                             and_(
                                 WordSerp.word_id == word.uuid,
                                 WordSerp.llm_id == llm.uuid,
-                                WordSerp.create_time > two_weeks_ago
+                                WordSerp.create_time > two_weeks_ago_naive
                             )
                         )
                     )
@@ -169,7 +171,7 @@ async def update_serp_data_direct(db: AsyncSession, group_id: Optional[uuid.UUID
                         content=llm_response,
                         llm_id=llm.uuid,
                         word_id=word.uuid,
-                        create_time=datetime.now(timezone.utc)
+                        create_time=datetime.now(timezone.utc).replace(tzinfo=None)
                     )
                     
                     db.add(word_serp)
@@ -693,7 +695,7 @@ async def start_group_analytics_by_id(
         for project in brand_projects_list:
             # Get brand mentions for this project
             mentions_result = await db.execute(
-                select(BrandMention).where(BrandMention.brand_project_id == project.uuid)
+                select(BrandMention).where(BrandMention.project_id == project.uuid)
             )
             mentions = list(mentions_result.scalars().all())
             
@@ -715,7 +717,7 @@ async def start_group_analytics_by_id(
             competitors = list(competitors_result.scalars().all())
             
             for competitor in competitors:
-                competitor_mention_count = sum(1 for m in mentions if m.competitor_mentioned and m.competitor_name == competitor.name)
+                competitor_mention_count = sum(1 for m in mentions if m.competitor_mentioned and m.mentioned_competitor == competitor.name)
                 if competitor_mention_count > 0:
                     tracked_competitors.append({
                         "competitor_name": competitor.name,
