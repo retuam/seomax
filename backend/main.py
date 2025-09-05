@@ -33,6 +33,173 @@ from datetime import datetime, timedelta
 
 # === DIRECT SERP UPDATE FUNCTIONS ===
 
+async def get_gemini_response_direct(word: str) -> str:
+    """Direct Gemini response retrieval for brand analysis"""
+    try:
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "contents": [{
+                "parts": [{"text": word}]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": 2000,
+                "temperature": 0.7
+            }
+        }
+        
+        response = requests.post(
+            f"{settings.gemini_api_url}?key={settings.gemini_api_key}",
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result['candidates'][0]['content']['parts'][0]['text']
+        else:
+            logger.error(f"Gemini API error: {response.status_code}")
+            raise Exception(f"Gemini API failed with status {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"Error getting response from Gemini: {e}")
+        raise Exception(f"Failed to get Gemini response: {e}")
+
+async def get_anthropic_response_direct(word: str) -> str:
+    """Direct Anthropic response retrieval for brand analysis"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.anthropic_api_key}",
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+        
+        data = {
+            "model": settings.anthropic_model,
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": word}]
+        }
+        
+        response = requests.post(
+            settings.anthropic_api_url,
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result['content'][0]['text']
+        else:
+            logger.error(f"Anthropic API error: {response.status_code}")
+            raise Exception(f"Anthropic API failed with status {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"Error getting response from Anthropic: {e}")
+        raise Exception(f"Failed to get Anthropic response: {e}")
+
+async def get_grok_response_direct(word: str) -> str:
+    """Direct Grok response retrieval for brand analysis"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.grok_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": settings.grok_model,
+            "messages": [{"role": "user", "content": word}],
+            "max_tokens": 2000,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(
+            settings.grok_api_url,
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result['choices'][0]['message']['content']
+        else:
+            logger.error(f"Grok API error: {response.status_code}")
+            raise Exception(f"Grok API failed with status {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"Error getting response from Grok: {e}")
+        raise Exception(f"Failed to get Grok response: {e}")
+
+async def get_mistral_response_direct(word: str) -> str:
+    """Direct Mistral response retrieval for brand analysis"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.mistral_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": settings.mistral_model,
+            "messages": [{"role": "user", "content": word}],
+            "max_tokens": 2000,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(
+            settings.mistral_api_url,
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result['choices'][0]['message']['content']
+        else:
+            logger.error(f"Mistral API error: {response.status_code}")
+            raise Exception(f"Mistral API failed with status {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"Error getting response from Mistral: {e}")
+        raise Exception(f"Failed to get Mistral response: {e}")
+
+async def get_perplexity_response_direct(word: str) -> str:
+    """Direct Perplexity response retrieval for brand analysis"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.perplexity_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": settings.perplexity_model,
+            "messages": [{"role": "user", "content": word}],
+            "max_tokens": 2000,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(
+            settings.perplexity_api_url,
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result['choices'][0]['message']['content']
+        else:
+            logger.error(f"Perplexity API error: {response.status_code}")
+            raise Exception(f"Perplexity API failed with status {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"Error getting response from Perplexity: {e}")
+        raise Exception(f"Failed to get Perplexity response: {e}")
+
 async def get_openai_response_direct(word: str) -> str:
     """Direct OpenAI response retrieval for brand analysis"""
     try:
@@ -161,6 +328,31 @@ async def update_serp_data_direct(db: AsyncSession, group_id: Optional[uuid.UUID
                             logger.error(f"OpenAI API key not configured, skipping LLM '{llm.name}'")
                             continue
                         llm_response = await get_openai_response_direct(word.name)
+                    elif llm.name.lower() == "gemini":
+                        if not settings.gemini_api_key:
+                            logger.error(f"Gemini API key not configured, skipping LLM '{llm.name}'")
+                            continue
+                        llm_response = await get_gemini_response_direct(word.name)
+                    elif llm.name.lower() == "anthropic":
+                        if not settings.anthropic_api_key:
+                            logger.error(f"Anthropic API key not configured, skipping LLM '{llm.name}'")
+                            continue
+                        llm_response = await get_anthropic_response_direct(word.name)
+                    elif llm.name.lower() == "grok":
+                        if not settings.grok_api_key:
+                            logger.error(f"Grok API key not configured, skipping LLM '{llm.name}'")
+                            continue
+                        llm_response = await get_grok_response_direct(word.name)
+                    elif llm.name.lower() == "mistral":
+                        if not settings.mistral_api_key:
+                            logger.error(f"Mistral API key not configured, skipping LLM '{llm.name}'")
+                            continue
+                        llm_response = await get_mistral_response_direct(word.name)
+                    elif llm.name.lower() == "perplexity":
+                        if not settings.perplexity_api_key:
+                            logger.error(f"Perplexity API key not configured, skipping LLM '{llm.name}'")
+                            continue
+                        llm_response = await get_perplexity_response_direct(word.name)
                     else:
                         logger.warning(f"LLM {llm.name} not implemented, skipping")
                         continue
@@ -247,15 +439,11 @@ async def analyze_brand_mentions_for_word_direct(word, word_serp, llm_response, 
                 if brand_mentioned or competitor_mentioned:
                     # Create mention record
                     brand_mention = BrandMention(
-                        brand_project_id=brand_project.uuid,
-                        word_id=word.uuid,
-                        llm_id=word_serp.llm_id,
+                        project_id=brand_project.uuid,
                         serp_id=word_serp.uuid,
-                        brand_mentioned=brand_mentioned,
-                        competitor_name=competitor.name if competitor_mentioned else None,
-                        competitor_mentioned=competitor_mentioned,
-                        mention_context=llm_response[:500],  # First 500 characters as context
-                        created_at=datetime.now(timezone.utc)
+                        brand_mentioned=1 if brand_mentioned else 0,
+                        mentioned_competitor=competitor.name if competitor_mentioned else None,
+                        competitor_mentioned=1 if competitor_mentioned else 0
                     )
                     db.add(brand_mention)
                     
