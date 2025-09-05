@@ -42,9 +42,9 @@ async def get_openai_response_direct(word: str) -> str:
         }
         
         data = {
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-4o-mini",
             "messages": [{"role": "user", "content": word}],
-            "max_tokens": 1000,
+            "max_tokens": 2000,
             "temperature": 0.7
         }
         
@@ -60,11 +60,11 @@ async def get_openai_response_direct(word: str) -> str:
             return result['choices'][0]['message']['content']
         else:
             logger.error(f"OpenAI API error: {response.status_code}")
-            return f"Mock results for '{word}': 1. Result 1 - description, 2. Result 2 - description"
+            raise Exception(f"OpenAI API failed with status {response.status_code}")
             
     except Exception as e:
         logger.error(f"Error getting response from OpenAI: {e}")
-        return f"Mock results for '{word}': 1. Result 1 - description, 2. Result 2 - description"
+        raise Exception(f"Failed to get OpenAI response: {e}")
 
 async def extract_companies_from_response_direct(llm_response: str) -> list:
     """Direct company extraction from LLM response"""
@@ -83,9 +83,9 @@ async def extract_companies_from_response_direct(llm_response: str) -> list:
         }
         
         data = {
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-4o-mini",
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 500,
+            "max_tokens": 2000,
             "temperature": 0.3
         }
         
@@ -103,11 +103,11 @@ async def extract_companies_from_response_direct(llm_response: str) -> list:
             return companies[:10]  # Maximum 10 companies
         else:
             logger.error(f"OpenAI API error during company extraction: {response.status_code}")
-            return ["Company 1", "Company 2", "Company 3"]
+            raise Exception(f"OpenAI API failed during company extraction: {response.status_code}")
             
     except Exception as e:
         logger.error(f"Error extracting companies: {e}")
-        return ["Company 1", "Company 2", "Company 3"]
+        raise Exception(f"Failed to extract companies: {e}")
 
 async def update_serp_data_direct(db: AsyncSession, group_id: Optional[uuid.UUID] = None):
     """Direct SERP data update without worker with brand monitoring support"""
