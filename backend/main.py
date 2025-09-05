@@ -157,6 +157,9 @@ async def update_serp_data_direct(db: AsyncSession, group_id: Optional[uuid.UUID
                     
                     # Get LLM response
                     if llm.name.lower() == "openai":
+                        if not settings.openai_api_key:
+                            logger.error(f"OpenAI API key not configured, skipping LLM '{llm.name}'")
+                            continue
                         llm_response = await get_openai_response_direct(word.name)
                     else:
                         logger.warning(f"LLM {llm.name} not implemented, skipping")
