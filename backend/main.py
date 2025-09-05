@@ -575,21 +575,21 @@ async def get_word_analytics(
         if not word:
             logger.warning(f"Word {word_id} not found")
             return {"error": "Word not found"}
-        
+
         logger.info(f"Word found: {word.name}")
-        
+
         # Get SERP results
         serp_results = await db.execute(select(WordSerp).where(WordSerp.word_id == word_id))
         serp_list = list(serp_results.scalars().all())
-        
+
         # Get companies
         companies_list = []
         for serp in serp_list:
             companies_result = await db.execute(select(Company).where(Company.serp_id == serp.uuid))
             companies_list.extend(companies_result.scalars().all())
-        
+
         logger.info(f"Found SERP: {len(serp_list)}, companies: {len(companies_list)}")
-        
+
         # Return simple structure
         return {
             "word": {
