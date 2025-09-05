@@ -10,7 +10,7 @@ from typing import List, Optional
 import uuid
 from loguru import logger
 
-# Импорты конфигурации и логирования
+# Configuration and logging imports
 from config_simple import settings
 from logging_config import setup_logging, setup_sentry
 from database import get_db, check_database_connection, init_database, close_database, AsyncSessionLocal
@@ -31,20 +31,11 @@ import requests
 import json
 from datetime import datetime, timedelta
 
-# === ФУНКЦИИ ПРЯМОГО ОБНОВЛЕНИЯ SERP ===
+# === DIRECT SERP UPDATE FUNCTIONS ===
 
-async def get_serp_from_openai_direct(word: str) -> str:
-    """Прямое получение SERP данных от OpenAI"""
+async def get_openai_response_direct(word: str) -> str:
+    """Direct OpenAI response retrieval for brand analysis"""
     try:
-        prompt = f"""
-        Представь, что ты поисковая система. Для запроса "{word}" выдай топ-10 результатов поиска в формате:
-        1. Заголовок - краткое описание
-        2. Заголовок - краткое описание
-        ...
-        
-        Результаты должны быть релевантными и реалистичными.
-        """
-        
         headers = {
             "Authorization": f"Bearer {settings.openai_api_key}",
             "Content-Type": "application/json"
@@ -52,7 +43,7 @@ async def get_serp_from_openai_direct(word: str) -> str:
         
         data = {
             "model": "gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": word}],
             "max_tokens": 1000,
             "temperature": 0.7
         }
@@ -68,22 +59,22 @@ async def get_serp_from_openai_direct(word: str) -> str:
             result = response.json()
             return result['choices'][0]['message']['content']
         else:
-            logger.error(f"Ошибка OpenAI API: {response.status_code}")
-            return f"Моковые результаты для '{word}': 1. Результат 1 - описание, 2. Результат 2 - описание"
+            logger.error(f"OpenAI API error: {response.status_code}")
+            return f"Mock results for '{word}': 1. Result 1 - description, 2. Result 2 - description"
             
     except Exception as e:
-        logger.error(f"Ошибка получения SERP от OpenAI: {e}")
-        return f"Моковые результаты для '{word}': 1. Результат 1 - описание, 2. Результат 2 - описание"
+        logger.error(f"Error getting response from OpenAI: {e}")
+        return f"Mock results for '{word}': 1. Result 1 - description, 2. Result 2 - description"
 
-async def extract_companies_from_serp_direct(serp_text: str) -> List[str]:
-    """Прямое извлечение компаний из SERP текста"""
+async def extract_companies_from_response_direct(llm_response: str) -> list:
+    """Direct company extraction from LLM response"""
     try:
         prompt = f"""
-        Проанализируй следующие результаты поиска и извлеки названия компаний, брендов и организаций.
-        Верни только список названий через запятую, без дополнительного текста.
+        Analyze the following text and extract company names, brands, and organizations.
+        Return only a list of names separated by commas, without additional text.
         
-        Результаты поиска:
-        {serp_text}
+        Text:
+        {llm_response}
         """
         
         headers = {
@@ -109,21 +100,21 @@ async def extract_companies_from_serp_direct(serp_text: str) -> List[str]:
             result = response.json()
             companies_text = result['choices'][0]['message']['content']
             companies = [c.strip() for c in companies_text.split(',') if c.strip()]
-            return companies[:10]  # Максимум 10 компаний
+            return companies[:10]  # Maximum 10 companies
         else:
-            logger.error(f"Ошибка OpenAI API при извлечении компаний: {response.status_code}")
-            return ["Компания 1", "Компания 2", "Компания 3"]
+            logger.error(f"OpenAI API error during company extraction: {response.status_code}")
+            return ["Company 1", "Company 2", "Company 3"]
             
     except Exception as e:
-        logger.error(f"Ошибка извлечения компаний: {e}")
-        return ["Компания 1", "Компания 2", "Компания 3"]
+        logger.error(f"Error extracting companies: {e}")
+        return ["Company 1", "Company 2", "Company 3"]
 
 async def update_serp_data_direct(db: AsyncSession, group_id: Optional[uuid.UUID] = None):
-    """Прямое обновление SERP данных без воркера"""
+    """Direct SERP data update without worker with brand monitoring support"""
     try:
-        logger.info("🚀 Запуск прямого обновления SERP данных")
+        logger.info("🚀 Starting direct SERP data update")
         
-        # Получаем активные слова
+        # Get active words
         words_query = select(Word).where(Word.status == 1)
         if group_id:
             words_query = words_query.where(Word.group_id == group_id)
@@ -131,119 +122,167 @@ async def update_serp_data_direct(db: AsyncSession, group_id: Optional[uuid.UUID
         words_result = await db.execute(words_query)
         words = list(words_result.scalars().all())
         
-        # Получаем активные LLM
+        # Get active LLMs
         llms_result = await db.execute(select(LLM).where(LLM.is_active == 1))
         llms = list(llms_result.scalars().all())
         
-        logger.info(f"Найдено {len(words)} слов и {len(llms)} LLM для обработки")
+        logger.info(f"Found {len(words)} words and {len(llms)} LLMs for processing")
         
         processed_count = 0
         
         for word in words:
             for llm in llms:
                 try:
-                    # Проверяем, нужно ли обновлять данные
+                    # Check if data needs updating
+                    from datetime import timezone
+                    two_weeks_ago = datetime.now(timezone.utc) - timedelta(days=14)
+                    
                     existing_serp = await db.scalar(
                         select(WordSerp).where(
                             and_(
                                 WordSerp.word_id == word.uuid,
-                                WordSerp.llm_id == llm.uuid
+                                WordSerp.llm_id == llm.uuid,
+                                WordSerp.create_time > two_weeks_ago
                             )
                         )
                     )
                     
-                    # Обновляем если данных нет или они старше 14 дней
-                    should_update = False
-                    if not existing_serp:
-                        should_update = True
-                    elif existing_serp.updated_at < datetime.utcnow() - timedelta(days=14):
-                        should_update = True
+                    if existing_serp:
+                        logger.info(f"Word '{word.name}' with LLM '{llm.name}' already processed")
+                        continue
                     
-                    if should_update:
-                        logger.info(f"Обновление SERP для слова '{word.name}' и LLM '{llm.name}'")
-                        
-                        # Получаем SERP данные
-                        if llm.name.lower() == "openai":
-                            serp_text = await get_serp_from_openai_direct(word.name)
-                        else:
-                            # Для других LLM используем моковые данные
-                            serp_text = f"Моковые результаты для '{word.name}' от {llm.name}: 1. Результат 1, 2. Результат 2"
-                        
-                        # Сохраняем или обновляем SERP данные
-                        if existing_serp:
-                            existing_serp.serp_text = serp_text
-                            existing_serp.updated_at = datetime.utcnow()
-                        else:
-                            new_serp = WordSerp(
-                                word_id=word.uuid,
-                                llm_id=llm.uuid,
-                                serp_text=serp_text,
-                                created_at=datetime.utcnow(),
-                                updated_at=datetime.utcnow()
+                    logger.info(f"Processing word '{word.name}' with {llm.name}")
+                    
+                    # Get LLM response
+                    if llm.name.lower() == "openai":
+                        llm_response = await get_openai_response_direct(word.name)
+                    else:
+                        logger.warning(f"LLM {llm.name} not implemented, skipping")
+                        continue
+                    
+                    if not llm_response:
+                        logger.warning(f"No response from {llm.name} for word '{word.name}'")
+                        continue
+                    
+                    # Save LLM response
+                    word_serp = WordSerp(
+                        content=llm_response,
+                        llm_id=llm.uuid,
+                        word_id=word.uuid,
+                        create_time=datetime.now(timezone.utc)
+                    )
+                    
+                    db.add(word_serp)
+                    await db.flush()
+                    
+                    # Extract companies from LLM response
+                    companies = await extract_companies_from_response_direct(llm_response)
+                    
+                    # Save companies
+                    for company_name in companies:
+                        existing_company = await db.scalar(
+                            select(Company).where(
+                                Company.name == company_name,
+                                Company.serp_id == word_serp.uuid
                             )
-                            db.add(new_serp)
-                        
-                        # Извлекаем компании
-                        companies = await extract_companies_from_serp_direct(serp_text)
-                        
-                        # Сохраняем компании
-                        for company_name in companies:
-                            existing_company = await db.scalar(
-                                select(Company).where(Company.name == company_name)
+                        )
+                        if not existing_company:
+                            new_company = Company(
+                                name=company_name,
+                                serp_id=word_serp.uuid
                             )
-                            if not existing_company:
-                                new_company = Company(
-                                    name=company_name,
-                                    created_at=datetime.utcnow()
-                                )
-                                db.add(new_company)
-                        
-                        processed_count += 1
-                        
-                        # Коммитим каждые 10 обработанных пар
-                        if processed_count % 10 == 0:
-                            await db.commit()
-                            logger.info(f"Обработано {processed_count} пар слово-LLM")
+                            db.add(new_company)
+                    
+                    # Analyze brand mentions for this word group (if brand projects exist)
+                    if word.group_id:
+                        await analyze_brand_mentions_for_word_direct(word, word_serp, llm_response, db)
+                    
+                    processed_count += 1
+                    
+                    # Commit every 10 processed pairs
+                    if processed_count % 10 == 0:
+                        await db.commit()
+                        logger.info(f"Processed {processed_count} word-LLM pairs")
                     
                 except Exception as e:
-                    logger.error(f"Ошибка обработки слова '{word.name}' с LLM '{llm.name}': {e}")
+                    logger.error(f"Error processing word '{word.name}' with LLM '{llm.name}': {e}")
                     continue
         
-        # Финальный коммит
+        # Final commit
         await db.commit()
-        logger.info(f"✅ Обновление SERP данных завершено. Обработано {processed_count} пар")
+        logger.info(f"✅ SERP data update completed. Processed {processed_count} pairs, extracted companies and analyzed brands")
         
     except Exception as e:
-        logger.error(f"Ошибка прямого обновления SERP данных: {e}")
+        logger.error(f"Error in direct SERP data update: {e}")
         await db.rollback()
         raise
 
-# Настройка логирования и мониторинга
+async def analyze_brand_mentions_for_word_direct(word, word_serp, llm_response, db):
+    """Analyze brand mentions in LLM response for specific word"""
+    try:
+        from datetime import timezone
+        
+        # Get all brand projects for this word's group
+        brand_projects = await db.execute(
+            select(BrandProject).where(BrandProject.word_group_id == word.group_id)
+        )
+        
+        for brand_project in brand_projects.scalars().all():
+            # Get competitors for this project
+            competitors = await db.execute(
+                select(Competitor).where(Competitor.project_id == brand_project.uuid)
+            )
+            
+            # Check brand and competitor mentions
+            brand_mentioned = brand_project.brand_name.lower() in llm_response.lower()
+            
+            for competitor in competitors.scalars().all():
+                competitor_mentioned = competitor.name.lower() in llm_response.lower()
+                
+                if brand_mentioned or competitor_mentioned:
+                    # Create mention record
+                    brand_mention = BrandMention(
+                        brand_project_id=brand_project.uuid,
+                        word_id=word.uuid,
+                        llm_id=word_serp.llm_id,
+                        serp_id=word_serp.uuid,
+                        brand_mentioned=brand_mentioned,
+                        competitor_name=competitor.name if competitor_mentioned else None,
+                        competitor_mentioned=competitor_mentioned,
+                        mention_context=llm_response[:500],  # First 500 characters as context
+                        created_at=datetime.now(timezone.utc)
+                    )
+                    db.add(brand_mention)
+                    
+    except Exception as e:
+        logger.error(f"Error analyzing brand mentions: {e}")
+
+# Logging and monitoring setup
 setup_logging()
 if settings.sentry_dsn:
     setup_sentry()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Управление жизненным циклом приложения"""
+    """Application lifecycle management"""
     # Startup
     logger.info(" Starting SEO Analyzer API...")
     
-    # Проверяем соединение с базой данных
+    # Check database connection
     if await check_database_connection():
         logger.info("Database connection established")
     else:
         logger.warning("Database connection failed - starting without DB")
-        # Не останавливаем сервер, просто предупреждаем
+        # Don't stop server, just warn
     
-    # Инициализируем базу данных (только если подключение успешно)
+    # Initialize database (only if connection successful)
     try:
         await init_database()
         logger.info("Database initialized")
     except Exception as e:
         logger.warning(f"Database initialization failed: {e}")
     
-    # Инициализируем LLM сервис
+    # Initialize LLM service
     available_providers = llm_service.get_available_providers()
     logger.info(f"LLM Service initialized with providers: {available_providers}")
     
@@ -256,42 +295,42 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SEO Analyzer API",
-    description="API для анализа SEO ключевых слов с интеграцией LLM",
+    description="API for SEO keyword analysis with LLM integration",
     version="1.0.0",
     lifespan=lifespan
 )
 
-# Добавляем middleware
+# Add middleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     TrustedHostMiddleware, 
     allowed_hosts=settings.allowed_hosts or ["*"]
 )
 
-# CORS настройки для фронтенда
+# CORS settings for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешить все домены
-    allow_credentials=False,  # Отключить credentials для безопасности при allow_origins=["*"]
+    allow_origins=["*"],  # Allow all domains
+    allow_credentials=False,  # Disable credentials for security when allow_origins=["*"]
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"]
 )
 
-# === АВТОРИЗАЦИЯ ===
+# === AUTHENTICATION ===
 
 @app.post("/api/auth/register", response_model=UserResponse)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Регистрация нового пользователя"""
-    # Проверяем, существует ли пользователь
+    """Register new user"""
+    # Check if user exists
     existing_user = await db.scalar(select(User).where(User.email == user_data.email))
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Пользователь с таким email уже существует"
+            detail="User with this email already exists"
         )
     
-    # Создаем нового пользователя
+    # Create new user
     hashed_password = hash_password(user_data.password)
     new_user = User(
         email=user_data.email,
@@ -306,13 +345,13 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
-    """Авторизация пользователя"""
+    """User authentication"""
     user = await db.scalar(select(User).where(User.email == user_data.email))
     
     if not user or not verify_password(user_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный email или пароль"
+            detail="Invalid email or password"
         )
     
     access_token = create_access_token(data={"sub": user.email})
@@ -320,17 +359,17 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/auth/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    """Получение информации о текущем пользователе"""
+    """Get current user information"""
     return current_user
 
-# === ГРУППЫ СЛОВ ===
+# === WORD GROUPS ===
 
 @app.get("/api/word-groups", response_model=List[WordGroupResponse])
 async def get_word_groups(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Получение всех групп слов пользователя"""
+    """Get all user word groups"""
     result = await db.execute(select(WordGroup).where(WordGroup.user_id == current_user.uuid))
     return result.scalars().all()
 
@@ -340,7 +379,7 @@ async def create_word_group(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Создание новой группы слов"""
+    """Create new word group"""
     new_group = WordGroup(name=group_data.name, user_id=current_user.uuid)
     db.add(new_group)
     await db.commit()
@@ -354,13 +393,13 @@ async def update_word_group(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Обновление группы слов"""
+    """Update word group"""
     group = await db.scalar(select(WordGroup).where(
         WordGroup.uuid == group_id,
         WordGroup.user_id == current_user.uuid
     ))
     if not group:
-        raise HTTPException(status_code=404, detail="Группа не найдена")
+        raise HTTPException(status_code=404, detail="Group not found")
     
     group.name = group_data.name
     await db.commit()
@@ -373,19 +412,19 @@ async def delete_word_group(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Удаление группы слов"""
+    """Delete word group"""
     group = await db.scalar(select(WordGroup).where(
         WordGroup.uuid == group_id,
         WordGroup.user_id == current_user.uuid
     ))
     if not group:
-        raise HTTPException(status_code=404, detail="Группа не найдена")
+        raise HTTPException(status_code=404, detail="Group not found")
     
     await db.delete(group)
     await db.commit()
-    return {"message": "Группа удалена"}
+    return {"message": "Group deleted"}
 
-# === СЛОВА ===
+# === WORDS ===
 
 @app.get("/api/words", response_model=List[WordResponse])
 async def get_words(
@@ -393,7 +432,7 @@ async def get_words(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Получение всех слов или слов определенной группы"""
+    """Get all words or words from specific group"""
     query = select(Word).where(Word.status == 1)
     if group_id:
         query = query.where(Word.group_id == group_id)
@@ -407,7 +446,7 @@ async def create_word(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Создание нового слова"""
+    """Create new word"""
     new_word = Word(
         name=word_data.name,
         group_id=word_data.group_id
@@ -424,10 +463,10 @@ async def update_word(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Обновление слова"""
+    """Update word"""
     word = await db.scalar(select(Word).where(Word.uuid == word_id))
     if not word:
-        raise HTTPException(status_code=404, detail="Слово не найдено")
+        raise HTTPException(status_code=404, detail="Word not found")
     
     if word_data.name is not None:
         word.name = word_data.name
@@ -446,23 +485,23 @@ async def delete_word(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Мягкое удаление слова"""
+    """Soft delete word"""
     word = await db.scalar(select(Word).where(Word.uuid == word_id))
     if not word:
-        raise HTTPException(status_code=404, detail="Слово не найдено")
+        raise HTTPException(status_code=404, detail="Word not found")
     
-    word.status = 0  # Мягкое удаление
+    word.status = 0  # Soft delete
     await db.commit()
-    return {"message": "Слово удалено"}
+    return {"message": "Word deleted"}
 
-# === LLM ПРОВАЙДЕРЫ ===
+# === LLM PROVIDERS ===
 
 @app.get("/api/llm", response_model=List[LLMResponse])
 async def get_llm_providers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Получение всех LLM провайдеров"""
+    """Get all LLM providers"""
     result = await db.execute(select(LLM))
     return result.scalars().all()
 
@@ -472,7 +511,7 @@ async def create_llm_provider(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Создание нового LLM провайдера"""
+    """Create new LLM provider"""
     new_llm = LLM(
         name=llm_data.name,
         api_url=llm_data.api_url,
@@ -489,19 +528,19 @@ async def _get_word_analytics_data(
     word_id: uuid.UUID,
     db: AsyncSession
 ) -> WordAnalytics:
-    """Внутренняя функция для получения аналитики по слову"""
+    """Internal function to get word analytics"""
     try:
         word = await db.scalar(select(Word).where(Word.uuid == word_id))
         if not word:
-            raise HTTPException(status_code=404, detail="Слово не найдено")
+            raise HTTPException(status_code=404, detail="Word not found")
         
-        # Получаем SERP результаты
+        # Get SERP results
         serp_results = await db.execute(
             select(WordSerp).where(WordSerp.word_id == word_id)
         )
         serp_list = list(serp_results.scalars().all())
         
-        # Получаем компании (без JOIN для упрощения)
+        # Get companies (without JOIN for simplicity)
         companies_list = []
         if serp_list:
             for serp in serp_list:
@@ -518,8 +557,8 @@ async def _get_word_analytics_data(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Ошибка получения аналитики по слову {word_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка получения аналитики: {str(e)}")
+        logger.error(f"Error getting word analytics {word_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting analytics: {str(e)}")
 
 @app.get("/api/analytics/word/{word_id}")
 async def get_word_analytics(
@@ -527,31 +566,31 @@ async def get_word_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Получение аналитики по конкретному слову"""
+    """Get analytics for specific word"""
     try:
-        logger.info(f"Получение аналитики для слова: {word_id}")
+        logger.info(f"Getting analytics for word: {word_id}")
         
-        # Получаем слово
+        # Get word
         word = await db.scalar(select(Word).where(Word.uuid == word_id))
         if not word:
-            logger.warning(f"Слово {word_id} не найдено")
-            return {"error": "Слово не найдено"}
+            logger.warning(f"Word {word_id} not found")
+            return {"error": "Word not found"}
         
-        logger.info(f"Слово найдено: {word.name}")
+        logger.info(f"Word found: {word.name}")
         
-        # Получаем SERP результаты
+        # Get SERP results
         serp_results = await db.execute(select(WordSerp).where(WordSerp.word_id == word_id))
         serp_list = list(serp_results.scalars().all())
         
-        # Получаем компании
+        # Get companies
         companies_list = []
         for serp in serp_list:
             companies_result = await db.execute(select(Company).where(Company.serp_id == serp.uuid))
             companies_list.extend(companies_result.scalars().all())
         
-        logger.info(f"Найдено SERP: {len(serp_list)}, компаний: {len(companies_list)}")
+        logger.info(f"Found SERP: {len(serp_list)}, companies: {len(companies_list)}")
         
-        # Возвращаем простую структуру
+        # Return simple structure
         return {
             "word": {
                 "uuid": str(word.uuid),
@@ -578,38 +617,38 @@ async def get_word_analytics(
         }
         
     except Exception as e:
-        logger.error(f"Ошибка получения аналитики по слову {word_id}: {e}")
+        logger.error(f"Error getting word analytics {word_id}: {e}")
         import traceback
         traceback.print_exc()
-        return {"error": f"Ошибка: {str(e)}"}
+        return {"error": f"Error: {str(e)}"}
 
 @app.post("/api/analytics/start")
 async def start_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Запуск общей аналитики"""
+    """Start general analytics"""
     try:
-        # Прямое обновление SERP данных без воркера
+        # Direct SERP data update without worker
         await update_serp_data_direct(db)
-        return {"message": "Аналитика запущена", "status": "started"}
+        return {"message": "Analytics started", "status": "started"}
     except Exception as e:
-        logger.error(f"Ошибка запуска аналитики: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка запуска аналитики: {str(e)}")
+        logger.error(f"Error starting analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting analytics: {str(e)}")
 
 @app.post("/api/analytics/group/start")
 async def start_group_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Запуск аналитики для всех групп"""
+    """Start analytics for all groups"""
     try:
-        # Прямое обновление SERP данных без воркера
+        # Direct SERP data update without worker
         await update_serp_data_direct(db)
-        return {"message": "Аналитика групп запущена", "status": "started"}
+        return {"message": "Group analytics started", "status": "started"}
     except Exception as e:
-        logger.error(f"Ошибка запуска аналитики групп: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка запуска аналитики групп: {str(e)}")
+        logger.error(f"Error starting group analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting group analytics: {str(e)}")
 
 @app.post("/api/analytics/group/{group_id}/start")
 async def start_group_analytics_by_id(
@@ -617,21 +656,21 @@ async def start_group_analytics_by_id(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Запуск аналитики для конкретной группы"""
+    """Start analytics for specific group"""
     try:
-        # Проверяем существование группы
+        # Check group existence
         group = await db.scalar(select(WordGroup).where(WordGroup.uuid == group_id))
         if not group:
-            raise HTTPException(status_code=404, detail="Группа не найдена")
+            raise HTTPException(status_code=404, detail="Group not found")
         
-        # Прямое обновление SERP данных без воркера
+        # Direct SERP data update without worker
         await update_serp_data_direct(db, group_id=group_id)
-        return {"message": f"Аналитика для группы {group.name} запущена", "status": "started"}
+        return {"message": f"Analytics for group {group.name} started", "status": "started"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Ошибка запуска аналитики для группы {group_id}: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка запуска аналитики для группы")
+        logger.error(f"Error starting analytics for group {group_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error starting group analytics")
 
 @app.get("/api/analytics/group/{group_id}")
 async def get_group_analytics(
@@ -639,32 +678,32 @@ async def get_group_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Получение аналитики по группе слов"""
+    """Get analytics for word group"""
     try:
-        logger.info(f"Получение аналитики для группы: {group_id}")
+        logger.info(f"Getting analytics for group: {group_id}")
         
-        # Получаем группу
+        # Get group
         group = await db.scalar(select(WordGroup).where(WordGroup.uuid == group_id))
         if not group:
-            logger.warning(f"Группа {group_id} не найдена")
-            return {"error": "Группа не найдена"}
+            logger.warning(f"Group {group_id} not found")
+            return {"error": "Group not found"}
         
-        logger.info(f"Группа найдена: {group.name}")
+        logger.info(f"Group found: {group.name}")
         
-        # Получаем слова в группе
+        # Get words in group
         words_result = await db.execute(select(Word).where(Word.group_id == group_id))
         words_list = list(words_result.scalars().all())
         
-        logger.info(f"Найдено слов в группе: {len(words_list)}")
+        logger.info(f"Found words in group: {len(words_list)}")
         
-        # Формируем аналитику по каждому слову
+        # Build analytics for each word
         words_analytics = []
         for word in words_list:
-            # Получаем SERP для каждого слова
+            # Get SERP for each word
             serp_results = await db.execute(select(WordSerp).where(WordSerp.word_id == word.uuid))
             serp_list = list(serp_results.scalars().all())
             
-            # Получаем компании
+            # Get companies
             companies_list = []
             for serp in serp_list:
                 companies_result = await db.execute(select(Company).where(Company.serp_id == serp.uuid))
@@ -691,10 +730,10 @@ async def get_group_analytics(
         }
         
     except Exception as e:
-        logger.error(f"Ошибка получения аналитики по группе {group_id}: {e}")
+        logger.error(f"Error getting group analytics {group_id}: {e}")
         import traceback
         traceback.print_exc()
-        return {"error": f"Ошибка: {str(e)}"}
+        return {"error": f"Error: {str(e)}"}
 
 
 @app.post("/api/serp/update")
@@ -702,24 +741,24 @@ async def update_serp_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Запуск цикла обновления SERP данных"""
+    """Start SERP data update cycle"""
     try:
-        # Прямое обновление SERP данных без воркера
+        # Direct SERP data update without worker
         await update_serp_data_direct(db)
-        return {"message": "Цикл обновления SERP данных запущен"}
+        return {"message": "SERP data update cycle started"}
     except Exception as e:
-        logger.error(f"Ошибка обновления SERP данных: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка обновления SERP данных: {str(e)}")
+        logger.error(f"Error updating SERP data: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating SERP data: {str(e)}")
 
-# === СТАТИСТИКА ===
+# === STATISTICS ===
 
 @app.get("/api/stats")
 async def get_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Получение общей статистики"""
-    # Подсчет различных сущностей
+    """Get general statistics"""
+    # Count various entities
     words_count = await db.scalar(select(func.count(Word.uuid)).where(Word.status == 1))
     groups_count = await db.scalar(select(func.count(WordGroup.uuid)))
     serp_count = await db.scalar(select(func.count(WordSerp.uuid)))
@@ -741,36 +780,36 @@ async def create_brand_project(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        # Логирование для отладки
-        logger.info(f"Создание brand проекта с word_group_id: {project_data.word_group_id}")
+        # Debug logging
+        logger.info(f"Creating brand project with word_group_id: {project_data.word_group_id}")
         
-        # Проверяем существование группы слов, если указана
+        # Check word group existence if specified
         if project_data.word_group_id:
             group_result = await db.execute(
                 select(WordGroup).where(WordGroup.uuid == project_data.word_group_id)
             )
             word_group = group_result.scalar_one_or_none()
             if not word_group:
-                logger.warning(f"Группа слов с ID {project_data.word_group_id} не найдена")
+                logger.warning(f"Word group with ID {project_data.word_group_id} not found")
                 raise HTTPException(status_code=400, detail="Word group not found")
-            logger.info(f"Найдена группа слов: {word_group.name}")
+            logger.info(f"Found word group: {word_group.name}")
         
-        # 1. Создаём проект
+        # 1. Create project
         brand_project = BrandProject(
             name=project_data.name,
             brand_name=project_data.brand_name,
             brand_description=project_data.brand_description,
             keywords_count=project_data.keywords_count,
             user_id=current_user.uuid,
-            word_group_id=project_data.word_group_id  # Привязка к группе слов
+            word_group_id=project_data.word_group_id  # Link to word group
         )
         db.add(brand_project)
         await db.flush()
         
-        # Логирование после создания
-        logger.info(f"Brand проект создан с UUID: {brand_project.uuid}, word_group_id: {brand_project.word_group_id}")
+        # Logging after creation
+        logger.info(f"Brand project created with UUID: {brand_project.uuid}, word_group_id: {brand_project.word_group_id}")
 
-        # 2. Создаём конкурентов (если переданы)
+        # 2. Create competitors (if provided)
         competitors = []
         for competitor_name in (project_data.competitors or [])[:10]:
             competitor = Competitor(
@@ -783,13 +822,13 @@ async def create_brand_project(
         await db.commit()
         await db.refresh(brand_project)
 
-        # 3. Загружаем конкурентов
+        # 3. Load competitors
         competitors_result = await db.execute(
             select(Competitor).where(Competitor.project_id == brand_project.uuid)
         )
         competitors_db = competitors_result.scalars().all()
 
-        # 4. Формируем dict под BrandProjectResponse (Pydantic v2)
+        # 4. Build dict for BrandProjectResponse (Pydantic v2)
         response = {
             "uuid": brand_project.uuid,
             "name": brand_project.name,
@@ -810,15 +849,15 @@ async def create_brand_project(
             ]
         }
 
-        # Логирование ответа
-        logger.info(f"Отправляем ответ с word_group_id: {response['word_group_id']}")
+        # Response logging
+        logger.info(f"Sending response with word_group_id: {response['word_group_id']}")
 
-        # 5. Возвращаем через модель Pydantic v2 (если не совпадёт — лови ошибку в логе!)
+        # 5. Return via Pydantic v2 model (if doesn't match - catch error in log!)
         return BrandProjectResponse.model_validate(response)
 
     except Exception as e:
         await db.rollback()
-        logger.error(f"Ошибка создания brand проекта: {e}")
+        logger.error(f"Error creating brand project: {e}")
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -832,10 +871,10 @@ async def update_brand_project(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        # Логирование для отладки
-        logger.info(f"Обновление brand проекта {project_id} с word_group_id: {project_data.word_group_id}")
+        # Debug logging
+        logger.info(f"Updating brand project {project_id} with word_group_id: {project_data.word_group_id}")
         
-        # 1. Найти проект
+        # 1. Find project
         project_result = await db.execute(
             select(BrandProject).where(
                 BrandProject.uuid == project_id,
@@ -847,20 +886,20 @@ async def update_brand_project(
         if not brand_project:
             raise HTTPException(status_code=404, detail="Brand project not found")
         
-        logger.info(f"Текущий word_group_id проекта: {brand_project.word_group_id}")
+        logger.info(f"Current project word_group_id: {brand_project.word_group_id}")
         
-        # Проверяем существование группы слов, если указана
+        # Check word group existence if specified
         if project_data.word_group_id:
             group_result = await db.execute(
                 select(WordGroup).where(WordGroup.uuid == project_data.word_group_id)
             )
             word_group = group_result.scalar_one_or_none()
             if not word_group:
-                logger.warning(f"Группа слов с ID {project_data.word_group_id} не найдена")
+                logger.warning(f"Word group with ID {project_data.word_group_id} not found")
                 raise HTTPException(status_code=400, detail="Word group not found")
-            logger.info(f"Найдена группа слов для обновления: {word_group.name}")
+            logger.info(f"Found word group for update: {word_group.name}")
         
-        # 2. Обновить поля
+        # 2. Update fields
         if project_data.name is not None:
             brand_project.name = project_data.name
         if project_data.brand_name is not None:
@@ -872,16 +911,16 @@ async def update_brand_project(
         if project_data.word_group_id is not None:
             brand_project.word_group_id = project_data.word_group_id
         
-        # 3. Обновить конкурентов, если переданы
+        # 3. Update competitors if provided
         if project_data.competitors is not None:
-            # Удаляем старых конкурентов
+            # Delete old competitors
             existing_competitors = await db.execute(
                 select(Competitor).where(Competitor.project_id == brand_project.uuid)
             )
             for competitor in existing_competitors.scalars().all():
                 await db.delete(competitor)
             
-            # Добавляем новых конкурентов
+            # Add new competitors
             for competitor_name in project_data.competitors[:10]:
                 if competitor_name.strip():
                     competitor = Competitor(
@@ -893,16 +932,16 @@ async def update_brand_project(
         await db.commit()
         await db.refresh(brand_project)
         
-        # Логирование после обновления
-        logger.info(f"Brand проект обновлен, новый word_group_id: {brand_project.word_group_id}")
+        # Logging after update
+        logger.info(f"Brand project updated, new word_group_id: {brand_project.word_group_id}")
         
-        # 3. Загрузить конкурентов
+        # 3. Load competitors
         competitors_result = await db.execute(
             select(Competitor).where(Competitor.project_id == brand_project.uuid)
         )
         competitors_db = competitors_result.scalars().all()
         
-        # 4. Формировать ответ
+        # 4. Build response
         response = {
             "uuid": brand_project.uuid,
             "name": brand_project.name,
@@ -923,8 +962,8 @@ async def update_brand_project(
             ]
         }
         
-        # Логирование ответа для PUT
-        logger.info(f"Отправляем ответ PUT с word_group_id: {response['word_group_id']}")
+        # PUT response logging
+        logger.info(f"Sending PUT response with word_group_id: {response['word_group_id']}")
         
         return BrandProjectResponse.model_validate(response)
         
@@ -932,7 +971,7 @@ async def update_brand_project(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Ошибка обновления brand проекта: {e}")
+        logger.error(f"Error updating brand project: {e}")
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -990,7 +1029,7 @@ async def get_brand_project(
         .where(BrandProject.user_id == current_user.uuid)
     )
     if not project:
-        raise HTTPException(status_code=404, detail="Проект не найден")
+        raise HTTPException(status_code=404, detail="Project not found")
 
     competitors_result = await db.execute(
         select(Competitor).where(Competitor.project_id == project.uuid)
@@ -1024,16 +1063,16 @@ async def get_brand_analytics(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        # Проверяем существование проекта
+        # Check project existence
         project = await db.scalar(
             select(BrandProject)
             .where(BrandProject.uuid == project_id)
             .where(BrandProject.user_id == current_user.uuid)
         )
         if not project:
-            raise HTTPException(status_code=404, detail="Проект не найден")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        # Получаем все упоминания для проекта
+        # Get all mentions for project
         mentions_result = await db.execute(
             select(BrandMention).where(BrandMention.project_id == project_id)
         )
@@ -1052,7 +1091,7 @@ async def get_brand_analytics(
             for name, count in sorted(competitor_stats.items(), key=lambda x: x[1], reverse=True)[:5]
         ]
 
-        # Если тебе нужна схема — BrandAnalytics (как у тебя в schemas.py)
+        # If you need schema - BrandAnalytics (as in your schemas.py)
         return {
             "project_name": project.name,
             "brand_name": project.brand_name,
@@ -1077,11 +1116,11 @@ async def get_brand_analytics(
                 for m in mentions_list[:10]
             ]
         }
-        # Можно завернуть это в BrandAnalytics.model_validate(...), если хочешь строго
+        # Can wrap this in BrandAnalytics.model_validate(...) if you want strict validation
 
     except Exception as e:
-        logger.error(f"Ошибка получения brand аналитики: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка получения аналитики: {str(e)}")
+        logger.error(f"Error getting brand analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting analytics: {str(e)}")
 
 
 @app.delete("/api/brand-projects/{project_id}")
@@ -1096,12 +1135,12 @@ async def delete_brand_project(
         .where(BrandProject.user_id == current_user.uuid)
     )
     if not project:
-        raise HTTPException(status_code=404, detail="Проект не найден")
+        raise HTTPException(status_code=404, detail="Project not found")
 
-    # Мягкое удаление
+    # Soft delete
     project.status = 0
     await db.commit()
-    return {"message": "Проект удален"}
+    return {"message": "Project deleted"}
 
 
 if __name__ == "__main__":
