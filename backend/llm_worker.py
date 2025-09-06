@@ -71,8 +71,13 @@ class LLMWorker:
         """Extract company names from LLM response using OpenAI"""
         try:
             prompt = f"""
-            Extract company names, brands, and organizations mentioned in the following text.
+            Extract only company names, brands, and business organizations mentioned in the following text.
+            DO NOT include countries, cities, geographical locations, or personal names.
+            Focus only on business entities, corporations, brands, and companies.
             Return only a JSON array of company names, nothing else.
+            
+            Examples of what to include: "Apple", "Microsoft", "Google", "Tesla Inc"
+            Examples of what to exclude: "Estonia", "USA", "New York", "John Smith"
             
             Text: {llm_response[:1500]}
             """
