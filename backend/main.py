@@ -1003,6 +1003,9 @@ async def get_group_analytics(
         
         logger.info(f"Found words in group: {len(words_list)}")
         
+        # Get brand project for this group to get competitors
+        brand_project = await db.scalar(select(BrandProject).where(BrandProject.word_group_id == group_id))
+        
         # Build analytics for each word
         words_analytics = []
         for word in words_list:
@@ -1010,11 +1013,56 @@ async def get_group_analytics(
             serp_results = await db.execute(select(WordSerp).where(WordSerp.word_id == word.uuid))
             serp_list = list(serp_results.scalars().all())
             
-            # Get companies
+            # Get companies from all SERP results for this word
             companies_list = []
             for serp in serp_list:
                 companies_result = await db.execute(select(Company).where(Company.serp_id == serp.uuid))
                 companies_list.extend(companies_result.scalars().all())
+            
+            # Get unique companies
+            unique_companies = {}
+            for company in companies_list:
+                unique_companies[company.name] = company
+            companies_data = [{"name": name} for name in unique_companies.keys()]
+            
+            # Get competitors from brand project
+            competitors_data = []
+            if brand_project:
+                competitors_result = await db.execute(select(Competitor).where(Competitor.project_id == brand_project.uuid))
+                competitors_list = list(competitors_result.scalars().all())
+                competitors_data = [{"name": competitor.name} for competitor in competitors_list]
+            
+            # Get brand mentions data
+            latest_brand_mentions = 0
+            latest_competitor_mentions = 0
+            last_analysis_date = None
+            
+            if brand_project:
+                # Get latest brand mentions for this word's SERP results
+                for serp in serp_list:
+                    brand_mentions_result = await db.execute(
+                        select(BrandMention).where(
+                            BrandMention.serp_id == serp.uuid,
+                            BrandMention.project_id == brand_project.uuid
+                        )
+                    )
+                    brand_mentions_list = list(brand_mentions_result.scalars().all())
+                    
+                    for mention in brand_mentions_list:
+                        if mention.brand_mentioned == 1:
+                            latest_brand_mentions += 1
+                        if mention.competitor_mentioned == 1:
+                            latest_competitor_mentions += 1
+                        
+                        # Update last analysis date
+                        if mention.create_time and (not last_analysis_date or mention.create_time > last_analysis_date):
+                            last_analysis_date = mention.create_time
+            
+            # Calculate changes (simplified - using current values as we don't have historical data structure)
+            # In a real implementation, you would compare with previous period data
+            brand_mentions_change = 0  # Would need historical comparison
+            competitor_mentions_change = 0  # Would need historical comparison
+            companies_change = len(companies_data)  # Assuming all companies are new for now
             
             words_analytics.append({
                 "word": {
@@ -1024,7 +1072,15 @@ async def get_group_analytics(
                     "create_time": word.create_time.isoformat() if word.create_time else None
                 },
                 "serp_count": len(serp_list),
-                "companies_count": len(companies_list)
+                "companies_count": len(companies_data),
+                "companies": companies_data,
+                "competitors": competitors_data,
+                "latest_brand_mentions": latest_brand_mentions,
+                "latest_competitor_mentions": latest_competitor_mentions,
+                "brand_mentions_change": brand_mentions_change,
+                "competitor_mentions_change": competitor_mentions_change,
+                "companies_change": companies_change,
+                "last_analysis_date": last_analysis_date.isoformat() if last_analysis_date else None
             })
         
         return {
